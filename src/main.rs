@@ -24,6 +24,16 @@ fn main() {
     let mut frequencies: [f32; 12] = [0.0; 12];
 }
 
+/// Returns 440, 466, 493, 523, 554, 587, 622, 659, 698, 739, 783, 830
+/// (that is, A4, A#4, ..., G#5)
+fn fundamental_freq(index: usize) -> f32 {
+    if index >= 12 {
+        panic!("Wrong note index: {}", index);
+    }
+    // 440^(2^(n/12))
+    440.0_f32.powf(2.0_f32.powf(index as f32 / 12.0))
+}
+
 fn data_fn(data: &mut [f32], channels: usize, next_value: &mut impl FnMut() -> f32) {
     for frame in data.chunks_mut(channels) {
         let value = Sample::from(&next_value());
