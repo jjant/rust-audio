@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 fn main() {
     let frequency = Arc::new(Mutex::new(0.0));
-    let mut next_value = {
+    let next_value = {
         let frequency = Arc::clone(&frequency);
 
         move |options: &mut SampleRequestOptions| {
@@ -14,7 +14,7 @@ fn main() {
             let freq = *freq.deref();
 
             options.sample_clock = (options.sample_clock + 1.0) % options.sample_rate;
-            (options.sample_clock * freq * 2.0 * std::f32::consts::PI / options.sample_rate).sin()
+            sin(options, freq)
         }
     };
 
@@ -32,6 +32,10 @@ fn fundamental_freq(index: usize) -> f32 {
     }
     // 440^(2^(n/12))
     440.0_f32.powf(2.0_f32.powf(index as f32 / 12.0))
+}
+
+fn sin(options: &SampleRequestOptions, frequency: f32) -> f32 {
+    (options.sample_clock * frequency * 2.0 * std::f32::consts::PI / options.sample_rate).sin()
 }
 
 fn data_fn(data: &mut [f32], channels: usize, next_value: &mut impl FnMut() -> f32) {
