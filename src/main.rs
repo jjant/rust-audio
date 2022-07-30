@@ -3,6 +3,11 @@ use cpal::{Sample, Stream};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::Mutex;
+use winit::{
+    event::{Event, WindowEvent},
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+};
 
 fn main() {
     let frequency = Arc::new(Mutex::new(0.0));
@@ -22,6 +27,28 @@ fn main() {
     stream.play().unwrap();
 
     let mut frequencies: [f32; 12] = [0.0; 12];
+
+    run_event_loop();
+}
+
+fn run_event_loop() {
+    let event_loop = EventLoop::new();
+    let _window = WindowBuilder::new().build(&event_loop).unwrap();
+
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::Wait;
+
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                println!("Closing, bye");
+                *control_flow = ControlFlow::Exit;
+            }
+            _ => {}
+        }
+    });
 }
 
 /// Returns 440, 466, 493, 523, 554, 587, 622, 659, 698, 739, 783, 830
