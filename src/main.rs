@@ -12,32 +12,23 @@ use winit::{
 fn main() {
     let frequencies = Arc::new(Mutex::new([0.0_f32; 12]));
 
-    let next_value = {
-        let frequencies = Arc::clone(&frequencies);
+    let next_value = move |frequencies: &[f32], options: &mut SampleRequestOptions| {
+        options.tick();
 
-        move |options: &mut SampleRequestOptions| {
-            let freqs = frequencies.lock().unwrap();
-            let freqs = *freqs.deref();
-
-            //let count_non_zero = freqs.iter().copied().filter(|&d| d != 0.0).count();
-            //            if count_non_zero == 0 {
-            //                0.0
-            //            } else {
-            //                freqs
-            //                    .iter()
-            //                    .copied()
-            //                    .map(|freq| sin(options, freq))
-            //                    .sum::<f32>()
-            //                    / (count_non_zero as f32)
-            //            };
-            //
-            options.tick();
-
-            options.tone(440.) * 0.1 + options.tone(880.) * 0.1
+        let count_non_zero = frequencies.iter().copied().filter(|&d| d != 0.0).count();
+        if count_non_zero == 0 {
+            0.0
+        } else {
+            frequencies
+                .iter()
+                .copied()
+                .map(|freq| options.tone(freq))
+                .sum::<f32>()
+                / (count_non_zero as f32)
         }
     };
 
-    let stream = build_output_audio_stream(next_value);
+    let stream = build_output_audio_stream(Arc::clone(&frequencies), next_value);
     stream.play().unwrap();
 
     run_event_loop(frequencies);
@@ -79,40 +70,41 @@ fn run_event_loop(frequencies: Arc<Mutex<[f32; 12]>>) {
 
                     println!("Frequencies: {:?}", frequencies);
                 }
-                println!("Input: {:?}", input);
             }
             _ => {}
         }
     });
 }
 
-/// Returns 440, 466, 493, 523, 554, 587, 622, 659, 698, 739, 783, 830
-/// (that is, A4, A#4, ..., G#5)
+/// Returns frequency for A4, A#4, ..., G#5
 fn fundamental_freq(index: usize) -> f32 {
     if index >= 12 {
         panic!("Wrong note index: {}", index);
     }
-    // 440 * (2^(n/12))
     440.0_f32 * (2.0_f32.powf(index as f32 / 12.0))
 }
 
 fn data_fn(
     data: &mut [f32],
     options: &mut SampleRequestOptions,
-    next_value: &mut impl FnMut(&mut SampleRequestOptions) -> f32,
+    frequencies: &Mutex<[f32; 12]>,
+    next_value: &mut impl FnMut(&[f32], &mut SampleRequestOptions) -> f32,
 ) {
-    for frame in data.chunks_mut(options.num_channels) {
-        let value = Sample::from(&next_value(options));
+    let freqs = frequencies.lock().unwrap();
 
+    for frame in data.chunks_mut(options.num_channels) {
+        let value = Sample::from(&next_value(freqs.as_ref(), options));
+
+        // eprintln!("{}", value);
         for sample in frame.iter_mut() {
             *sample = value;
         }
     }
-    // println!("{:?}", data);
 }
 
 fn build_output_audio_stream(
-    mut next_value: impl FnMut(&mut SampleRequestOptions) -> f32 + Send + 'static,
+    frequencies: Arc<Mutex<[f32; 12]>>,
+    mut next_value: impl FnMut(&[f32], &mut SampleRequestOptions) -> f32 + Send + 'static,
 ) -> Stream {
     let host = cpal::default_host();
     let device = host
@@ -121,8 +113,6 @@ fn build_output_audio_stream(
     println!("Output device : {}", device.name().unwrap());
     let supported_config = device.default_output_config().unwrap();
     println!("Default output config : {:?}", supported_config);
-    println!("Channels: {}", supported_config.channels());
-    println!("Sample rate: {:?}", supported_config.sample_rate());
 
     let err_fn = |err| eprintln!("Something bad: {}", err);
 
@@ -134,10 +124,7 @@ fn build_output_audio_stream(
     let stream = device
         .build_output_stream(
             &supported_config.config(),
-            move |data, _| {
-                // println!("Data len: {}", data.len());
-                data_fn(data, &mut options, &mut next_value)
-            },
+            move |data, _| data_fn(data, &mut options, &frequencies, &mut next_value),
             err_fn,
         )
         .unwrap();
