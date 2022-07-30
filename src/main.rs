@@ -10,30 +10,47 @@ use winit::{
 };
 
 fn main() {
-    let frequency = Arc::new(Mutex::new(0.0));
+    let frequencies = Arc::new(Mutex::new([0.0_f32; 12]));
+
     let next_value = {
-        let frequency = Arc::clone(&frequency);
+        let frequencies = Arc::clone(&frequencies);
 
         move |options: &mut SampleRequestOptions| {
-            let freq = frequency.lock().unwrap();
-            let freq = *freq.deref();
+            let freqs = frequencies.lock().unwrap();
+            let freqs = *freqs.deref();
 
-            options.sample_clock = (options.sample_clock + 1.0) % options.sample_rate;
-            sin(options, freq)
+            //let count_non_zero = freqs.iter().copied().filter(|&d| d != 0.0).count();
+            //            if count_non_zero == 0 {
+            //                0.0
+            //            } else {
+            //                freqs
+            //                    .iter()
+            //                    .copied()
+            //                    .map(|freq| sin(options, freq))
+            //                    .sum::<f32>()
+            //                    / (count_non_zero as f32)
+            //            };
+            //
+            options.tick();
+            options.tone(441.0)
         }
     };
 
     let stream = build_output_audio_stream(next_value);
     stream.play().unwrap();
 
-    let mut frequencies: [f32; 12] = [0.0; 12];
-
-    run_event_loop();
+    run_event_loop(frequencies);
 }
 
-fn run_event_loop() {
+fn run_event_loop(frequencies: Arc<Mutex<[f32; 12]>>) {
     let event_loop = EventLoop::new();
     let _window = WindowBuilder::new().build(&event_loop).unwrap();
+
+    let keys = {
+        use winit::event::VirtualKeyCode::*;
+
+        [Q, W, E, R, T, Y, U, I, O, P, LBracket, RBracket]
+    };
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
@@ -46,6 +63,23 @@ fn run_event_loop() {
                 println!("Closing, bye");
                 *control_flow = ControlFlow::Exit;
             }
+            Event::WindowEvent {
+                event: WindowEvent::KeyboardInput { input, .. },
+                ..
+            } => {
+                if let Some(index) = keys.iter().position(|&k| Some(k) == input.virtual_keycode) {
+                    let mut frequencies = frequencies.lock().unwrap();
+
+                    frequencies[index] = if input.state == winit::event::ElementState::Pressed {
+                        fundamental_freq(index)
+                    } else {
+                        0.0
+                    };
+
+                    println!("Frequencies: {:?}", frequencies);
+                }
+                println!("Input: {:?}", input);
+            }
             _ => {}
         }
     });
@@ -57,12 +91,8 @@ fn fundamental_freq(index: usize) -> f32 {
     if index >= 12 {
         panic!("Wrong note index: {}", index);
     }
-    // 440^(2^(n/12))
-    440.0_f32.powf(2.0_f32.powf(index as f32 / 12.0))
-}
-
-fn sin(options: &SampleRequestOptions, frequency: f32) -> f32 {
-    (options.sample_clock * frequency * 2.0 * std::f32::consts::PI / options.sample_rate).sin()
+    // 440 * (2^(n/12))
+    440.0_f32 * (2.0_f32.powf(index as f32 / 12.0))
 }
 
 fn data_fn(data: &mut [f32], channels: usize, next_value: &mut impl FnMut() -> f32) {
@@ -73,6 +103,7 @@ fn data_fn(data: &mut [f32], channels: usize, next_value: &mut impl FnMut() -> f
             *sample = value;
         }
     }
+    // println!("{:?}", data);
 }
 
 fn build_output_audio_stream(
@@ -82,13 +113,12 @@ fn build_output_audio_stream(
     let device = host
         .default_output_device()
         .expect("No output device available");
-    let mut supported_configs_range = device.supported_output_configs().unwrap();
-    let supported_config = supported_configs_range
-        .next()
-        .unwrap()
-        .with_max_sample_rate();
+    println!("Output device : {}", device.name().unwrap());
+    let supported_config = device.default_output_config().unwrap();
+    println!("Default output config : {:?}", supported_config);
+    println!("Channels: {}", supported_config.channels());
+    println!("Sample rate: {:?}", supported_config.sample_rate());
 
-    // dbg!(&supported_config);
     let err_fn = |err| eprintln!("Something bad: {}", err);
 
     let stream = device
@@ -100,6 +130,7 @@ fn build_output_audio_stream(
                     sample_rate: supported_config.sample_rate().0 as f32,
                     sample_clock: 0.0,
                 };
+                // println!("Data len: {}", data.len());
                 data_fn(data, options.num_channels, &mut || next_value(&mut options))
             },
             err_fn,
@@ -113,4 +144,14 @@ struct SampleRequestOptions {
     sample_rate: f32,
     sample_clock: f32,
     num_channels: usize,
+}
+
+impl SampleRequestOptions {
+    fn tone(&self, frequency: f32) -> f32 {
+        (self.sample_clock * frequency * 2.0 * std::f32::consts::PI / self.sample_rate).sin()
+    }
+
+    fn tick(&mut self) {
+        self.sample_clock = (self.sample_clock + 1.0) % self.sample_rate;
+    }
 }
