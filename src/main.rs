@@ -126,15 +126,15 @@ fn build_output_audio_stream(
 
     let err_fn = |err| eprintln!("Something bad: {}", err);
 
+    let mut options = SampleRequestOptions {
+        num_channels: supported_config.channels() as usize,
+        sample_rate: supported_config.sample_rate().0 as f32,
+        sample_clock: 0.0,
+    };
     let stream = device
         .build_output_stream(
             &supported_config.config(),
             move |data, _| {
-                let mut options = SampleRequestOptions {
-                    num_channels: supported_config.channels() as usize,
-                    sample_rate: supported_config.sample_rate().0 as f32,
-                    sample_clock: 0.0,
-                };
                 // println!("Data len: {}", data.len());
                 data_fn(data, &mut options, &mut next_value)
             },
