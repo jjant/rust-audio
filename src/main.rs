@@ -32,7 +32,8 @@ fn main() {
             //            };
             //
             options.tick();
-            options.tone(441.0)
+
+            options.tone(440.) * 0.1 + options.tone(880.) * 0.1
         }
     };
 
@@ -95,9 +96,13 @@ fn fundamental_freq(index: usize) -> f32 {
     440.0_f32 * (2.0_f32.powf(index as f32 / 12.0))
 }
 
-fn data_fn(data: &mut [f32], channels: usize, next_value: &mut impl FnMut() -> f32) {
-    for frame in data.chunks_mut(channels) {
-        let value = Sample::from(&next_value());
+fn data_fn(
+    data: &mut [f32],
+    options: &mut SampleRequestOptions,
+    next_value: &mut impl FnMut(&mut SampleRequestOptions) -> f32,
+) {
+    for frame in data.chunks_mut(options.num_channels) {
+        let value = Sample::from(&next_value(options));
 
         for sample in frame.iter_mut() {
             *sample = value;
@@ -131,7 +136,7 @@ fn build_output_audio_stream(
                     sample_clock: 0.0,
                 };
                 // println!("Data len: {}", data.len());
-                data_fn(data, options.num_channels, &mut || next_value(&mut options))
+                data_fn(data, &mut options, &mut next_value)
             },
             err_fn,
         )
