@@ -10,19 +10,23 @@ use winit::{
 };
 
 fn main() {
-    let frequencies = Arc::new(Mutex::new([0.0_f32; 12]));
+    let frequencies = Arc::new(Mutex::new(vec![None; 12]));
 
-    let next_value = move |frequencies: &[f32], options: &mut SampleRequestOptions| {
+    let next_value = move |frequencies: &mut [Option<TimedFrequency>],
+                           options: &mut SampleRequestOptions| {
         options.tick();
 
-        let count_non_zero = frequencies.iter().copied().filter(|&d| d != 0.0).count();
+        let count_non_zero = frequencies.iter().filter_map(|d| d.as_ref()).count();
         if count_non_zero == 0 {
             0.0
         } else {
             frequencies
-                .iter()
-                .copied()
-                .map(|freq| options.tone(freq))
+                .iter_mut()
+                .filter_map(|x| x.as_mut())
+                .map(|freq| {
+                    freq.tick(options.sample_rate);
+                    freq.tone(options.sample_rate)
+                })
                 .sum::<f32>()
                 / (count_non_zero as f32)
         }
@@ -34,7 +38,7 @@ fn main() {
     run_event_loop(frequencies);
 }
 
-fn run_event_loop(frequencies: Arc<Mutex<[f32; 12]>>) {
+fn run_event_loop(frequencies: Arc<Mutex<Vec<Option<TimedFrequency>>>>) {
     let event_loop = EventLoop::new();
     let _window = WindowBuilder::new().build(&event_loop).unwrap();
 
@@ -63,9 +67,10 @@ fn run_event_loop(frequencies: Arc<Mutex<[f32; 12]>>) {
                     let mut frequencies = frequencies.lock().unwrap();
 
                     frequencies[index] = if input.state == winit::event::ElementState::Pressed {
-                        fundamental_freq(index)
+                        frequencies[index]
+                            .or_else(|| Some(TimedFrequency::new(fundamental_freq(index))))
                     } else {
-                        0.0
+                        None
                     };
 
                     println!("Frequencies: {:?}", frequencies);
@@ -87,13 +92,13 @@ fn fundamental_freq(index: usize) -> f32 {
 fn data_fn(
     data: &mut [f32],
     options: &mut SampleRequestOptions,
-    frequencies: &Mutex<[f32; 12]>,
-    next_value: &mut impl FnMut(&[f32], &mut SampleRequestOptions) -> f32,
+    frequencies: &Mutex<Vec<Option<TimedFrequency>>>,
+    next_value: &mut impl FnMut(&mut [Option<TimedFrequency>], &mut SampleRequestOptions) -> f32,
 ) {
-    let freqs = frequencies.lock().unwrap();
+    let mut freqs = frequencies.lock().unwrap();
 
     for frame in data.chunks_mut(options.num_channels) {
-        let value = Sample::from(&next_value(freqs.as_ref(), options));
+        let value = Sample::from(&next_value(freqs.as_mut(), options));
 
         // eprintln!("{}", value);
         for sample in frame.iter_mut() {
@@ -103,8 +108,10 @@ fn data_fn(
 }
 
 fn build_output_audio_stream(
-    frequencies: Arc<Mutex<[f32; 12]>>,
-    mut next_value: impl FnMut(&[f32], &mut SampleRequestOptions) -> f32 + Send + 'static,
+    frequencies: Arc<Mutex<Vec<Option<TimedFrequency>>>>,
+    mut next_value: impl FnMut(&mut [Option<TimedFrequency>], &mut SampleRequestOptions) -> f32
+        + Send
+        + 'static,
 ) -> Stream {
     let host = cpal::default_host();
     let device = host
@@ -145,5 +152,30 @@ impl SampleRequestOptions {
 
     fn tick(&mut self) {
         self.sample_clock = (self.sample_clock + 1.0) % self.sample_rate;
+    }
+}
+
+#[derive(Clone, Debug, Copy)]
+struct TimedFrequency {
+    frequency: f32,
+    sample_clock: f32,
+}
+
+impl TimedFrequency {
+    fn new(frequency: f32) -> Self {
+        Self {
+            frequency,
+            sample_clock: 0.0,
+        }
+    }
+
+    fn tone(&self, sample_rate: f32) -> f32 {
+        let arg = self.sample_clock * self.frequency * 2.0 * std::f32::consts::PI / sample_rate;
+        eprintln!("{}", arg);
+        arg.sin()
+    }
+
+    fn tick(&mut self, sample_rate: f32) {
+        self.sample_clock = (self.sample_clock + 1.0) % sample_rate;
     }
 }
