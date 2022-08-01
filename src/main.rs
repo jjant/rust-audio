@@ -1,6 +1,6 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Sample, Stream};
-use std::ops::Deref;
+use std::f32::consts::PI;
 use std::sync::Arc;
 use std::sync::Mutex;
 use winit::{
@@ -87,7 +87,7 @@ fn fundamental_freq(index: usize) -> f32 {
         panic!("Wrong note index: {}", index);
     }
 
-    (440.0_f32 * (2.0_f32.powf(index as f32 / 12.0))).round()
+    440.0_f32 * (2.0_f32.powf(index as f32 / 12.0))
 }
 
 fn data_fn(
@@ -147,10 +147,6 @@ struct SampleRequestOptions {
 }
 
 impl SampleRequestOptions {
-    fn tone(&self, frequency: f32) -> f32 {
-        (self.sample_clock * frequency * 2.0 * std::f32::consts::PI / self.sample_rate).sin()
-    }
-
     fn tick(&mut self) {
         self.sample_clock = (self.sample_clock + 1.0) % self.sample_rate;
     }
@@ -160,6 +156,7 @@ impl SampleRequestOptions {
 struct TimedFrequency {
     frequency: f32,
     sample_clock: f32,
+    offset: f32,
 }
 
 impl TimedFrequency {
@@ -167,16 +164,26 @@ impl TimedFrequency {
         Self {
             frequency,
             sample_clock: 0.0,
+            offset: 0.0,
         }
     }
 
     fn tone(&self, sample_rate: f32) -> f32 {
         let t = self.sample_clock / sample_rate;
-        let arg = t * self.frequency * 2.0 * std::f32::consts::PI;
+        let arg = t * self.frequency * 2.0 * PI + self.offset;
         arg.sin()
     }
 
     fn tick(&mut self, sample_rate: f32) {
-        self.sample_clock = (self.sample_clock + 1.0) % sample_rate;
+        self.sample_clock = self.sample_clock + 1.0;
+
+        if self.sample_clock >= sample_rate {
+            self.offset += self.angle(1.0) - (self.angle(1.0) / (2.0 * PI)).round() * 2.0 * PI;
+            self.sample_clock = self.sample_clock % sample_rate;
+        }
+    }
+
+    fn angle(&self, clock: f32) -> f32 {
+        self.frequency * 2.0 * PI * clock
     }
 }
