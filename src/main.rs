@@ -86,7 +86,8 @@ fn fundamental_freq(index: usize) -> f32 {
     if index >= 12 {
         panic!("Wrong note index: {}", index);
     }
-    440.0_f32 * (2.0_f32.powf(index as f32 / 12.0))
+
+    (440.0_f32 * (2.0_f32.powf(index as f32 / 12.0))).round()
 }
 
 fn data_fn(
@@ -170,8 +171,8 @@ impl TimedFrequency {
     }
 
     fn tone(&self, sample_rate: f32) -> f32 {
-        let arg = self.sample_clock * self.frequency * 2.0 * std::f32::consts::PI / sample_rate;
-        eprintln!("{}", arg);
+        let t = self.sample_clock / sample_rate;
+        let arg = t * self.frequency * 2.0 * std::f32::consts::PI;
         arg.sin()
     }
 
